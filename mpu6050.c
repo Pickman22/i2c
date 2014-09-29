@@ -21,30 +21,7 @@ void setupMPU6050(I2C_MODULE i2c, BOOL ad0) {
     }
 
     printf("Disabling sleep\n\r");
-    //UINT8 wakeup[] = {MPU6050_ADDRESS_W, MPU6050_RA_PWR_MGMT_1, 0x01};
-    int_writeByte((UINT8)MPU6050_ADDRESS_AD0_LOW, (UINT8)MPU6050_RA_PWR_MGMT_1, 0X01);
-    //error err;
-    //err = startTransfer(FALSE);
-    /*
-    if(err != NO_ERROR) {
-        debug(err);
-        printf("Setup failed...\n\r");
-        while(1);
-    }*/
-    //err = writeBytes(wakeup, 3);
-    /*
-    if(err != NO_ERROR) {
-        debug(err);
-        printf("Setup failed...\n\r");
-        while(1);
-    }*/
-    //err = stopTransfer();
-    /*
-    if(err != NO_ERROR) {
-        debug(err);
-        printf("Setup failed...\n\r");
-        while(1);
-    }*/
+    requestWriteByte((UINT8)MPU6050_ADDRESS_AD0_LOW, (UINT8)MPU6050_RA_PWR_MGMT_1, 0x01);
     DelayMs(100);
     printf("Setup OK\n\r");
 }

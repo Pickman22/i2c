@@ -21,6 +21,8 @@ typedef enum error_t {
 typedef enum I2CStates_t {
 	send_header = 1,
 	repeat_start,
+	read_command,
+	prepare_read,
 	start_writing,
 	start_reading,
 	stop,
@@ -33,9 +35,6 @@ typedef union I2CEvent_t{
     UINT8 busCollision: 1;
 }I2CEvent;
 
-#define READ_MODE 1
-#define WRITE_MODE 0
-
 typedef struct i2cbuffer_t {
 	UINT8 header[2];
 	UINT8 wdata[MAX_BUFFER_LEN];
@@ -43,9 +42,11 @@ typedef struct i2cbuffer_t {
 	UINT8 len;
 	UINT8 index;
     BOOL mode;
+    BOOL ready;
 }I2CBuffer;
 
-
+#define READ_MODE 1
+#define WRITE_MODE 0
 
 void setupI2CInterrupts(void);
 void initI2C(void);
@@ -75,12 +76,14 @@ void debug(error err);
 • During a slave-detected Stop – When slave sets the P bit (I2CxSTAT<4>)
 *************************************************************************************************/
 
-void int_startTransfer(BOOL repeat);
-void int_stopTransfer(void);
-void int_writeByte(UINT8 slave_address, UINT8 reg_address, UINT8 data);
-void int_writeBytes(UINT8 slave_address, UINT8 reg_address, UINT8* dat_arr, UINT8 len); 
-void int_readByte(UINT8 slave_address, UINT8 reg_address, UINT8* data); 
-void int_readBytes(UINT8 slave_address, UINT8 reg_address, UINT8* dat_arr, UINT8 len);
+/* Event driven I2C protocol */
+
+void requestStartTransfer(BOOL repeat);
+//void requestStopTransfer(void);
+void requestWriteByte(UINT8 slave_address, UINT8 reg_address, UINT8 data);
+void requestWriteBytes(UINT8 slave_address, UINT8 reg_address, UINT8* dat_arr, UINT8 len); 
+void requestReadByte(UINT8 slave_address, UINT8 reg_address, UINT8* data); 
+void requestReadBytes(UINT8 slave_address, UINT8 reg_address, UINT8* dat_arr, UINT8 len);
 
 #define I2C_CONFIG I2C_EN | I2C_SLW_DIS | I2C_IDLE_CON | I2C_7BIT_ADD | I2C_GC_DIS | I2C_SM_DIS
 

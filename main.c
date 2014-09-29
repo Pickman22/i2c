@@ -21,15 +21,17 @@ void initAll(void);
 int main(void) {
     UINT8 mpu_address = MPU6050_ADDRESS_AD0_LOW;
     initAll();
-    INT8 acc[] = {0};
+    UINT8 acc[2] = {0};
     INT16 acc16 = 0;
-
+    float acc_g = 0;
+    UINT8 data = 0;
     while(TRUE) {
-        //burstRead(mpu_address, (UINT8)MPU6050_RA_ACCEL_XOUT_H, acc, 2);
-        //acc16 = (INT16)((acc[0] << 8) | acc[1]);
-        //printf("Register data: %f.2\n\r", (float)acc16/16384);
+        requestReadBytes(MPU6050_ADDRESS_AD0_LOW, (UINT8)MPU6050_RA_ACCEL_XOUT_H, acc, 2); // burst read two bytes.
         PORTToggleBits(IOPORT_F, BIT_0); // LED5.
         DelayMs(1000);
+        acc16 = (INT16)((acc[0] << 8) | acc[1]);
+        acc_g = (float)acc16 / 16384.0;
+        printf("\n\rACC X: %f\n\r", acc_g);
     }
     return (EXIT_SUCCESS);
 }

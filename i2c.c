@@ -163,136 +163,158 @@ void debug(error err) {
 
 void __ISR(_I2C_VECTOR, IPL2) _masterEventISR(void) {
     if(INTGetFlag(INT_I2CM)) {
-        //printf("ISR\n\r");
+        
         switch(state) {
 
-            case send_header:
+            case send_header: // Send two header bytes to address the slave.
             putcUART1('1');
             //Keep sending the message till header is finished.
             if(buffer.index == 0) {
-                I2CTRN = buffer.header[0]; // Write slave address.
+                putcUART1('2');
                 buffer.index++; // Point to the next byte in header.
+                I2CTRN = buffer.header[0]; // Write slave address.
             }
             else { // If the first byte is already send, prepare for next state.
+                putcUART1('3');
                 if(buffer.mode == READ_MODE) { // Read mode.
-                    state = repeat_start; // A repeat start event after writing last header byte.
+                    putcUART1('4');
+                    state = repeat_start; // A repeat start event after writing last header byte.    
                 } else { // Write mode.
+                    putcUART1('5');
                     state = start_writing; // Go write register data after sending last header byte.
                 }
-                I2CTRN = buffer.header[1];
                 buffer.index = 0; // Restart index to begin reading or writing.
-            }     
+                putcUART1('6');
+                if(I2CSTATbits.ACKSTAT) {
+                    putcUART1('X'); // not acknowledge.
+                }
+                //printf("reset index\n\r");
+            }            
+            I2CTRN = buffer.header[1];
             break;
 
-            case start_writing:
-            putcUART1('2');
+            case start_writing: // Send data to slave.
+            if(I2CSTATbits.ACKSTAT) {
+                    putcUART1('X'); // Last byte not acknowledged.
+            }
+            putcUART1('7');
             if((buffer.index+1) == buffer.len) { // Last byte.
+                putcUART1('8');
                 state = stop; // Stop after sending last byte.
                 I2CTRN = buffer.wdata[buffer.index];  // Do not point to next byte as this is the last one.
             }
             // Write data and point to the next one. Keep in mind that when writing the last data byte,
             // index variable still increments one after writing.
             else {
+                putcUART1('9');
                 I2CTRN = buffer.wdata[buffer.index++]; // Write byte and point to the next one.
             }
             break;
 
-            case repeat_start:
-            putcUART1('3');
-            I2CCONbits.RCEN = TRUE; // Prepare receiver.
+            case repeat_start: // Repeat start to read.
+            state = read_command; // Prepare to receive data.
+            putcUART1('A');
             I2CCONbits.RSEN = TRUE; // Generate repeat start event.
-            state = start_reading; // Prepare to receive data.
             break;
 
-            case start_reading:
-            putcUART1('4');
+            case read_command: // Generate a read command.
+            putcUART1('a');
+            state = prepare_read;
+            I2CTRN = (buffer.header[0] | 0x1);
+            break;
+
+            case prepare_read: // Read command transmited. Enable receiver.
+            if(I2CSTATbits.ACKSTAT) {
+                    putcUART1('X'); // not acknowledge.
+            }
+            putcUART1('b');
+            state = start_reading;
+            I2CCONbits.RCEN = TRUE;
+            break;
+
+            case start_reading: // Read data from I2RCV register. And re-enable receiver if needed.
+            putcUART1('B');
             if((buffer.index+1) == buffer.len) { // Last byte. No acknowledge.
                 *(buffer.rdata + buffer.index) = I2CRCV; // Read data and finish.
                 I2CCONbits.ACKDT = TRUE; // Configure nack.
                 state = stop;
+                putcUART1('C');
             } else {
                 I2CCONbits.ACKDT = FALSE; // Configure ack. Keep reading.
-                *(buffer.rdata + buffer.index) = I2CRCV; // Read register data. Point to next slot.
+                *(buffer.rdata + buffer.index++) = I2CRCV; // Read register data. Point to next slot.
                 I2CCONbits.RCEN = TRUE; // Prepare receiver.
+                putcUART1('D');
             }      
             I2CCONbits.ACKEN = 1; // Acknowledge generation.
+            break;
 
-            case stop:
-            putcUART1('5');
+            case stop: // Stop event.
+            putcUART1('E');
             state = wait_done; // Nothing lef to do.
             I2CCONbits.PEN = TRUE; // Generate stop event.
             break;
 
-            case wait_done:
-            putcUART1('6');
+            case wait_done: // Wait for slave to detect stop.
+            putcUART1('F');
             state = done; // Slave detected stop.
+            buffer.ready = TRUE; // Buffer is ready to be read.
             break;
 
             default: // handle error?
-            putcUART1('x');
+            putcUART1('G');
             break;
         }
     }
     if(INTGetFlag(INT_I2CB)) {
-        printf("Collision\n\r");
+        putcUART1('H');
     }
     INTClearFlag(INT_I2C);
 }
 
-void int_startTransfer(BOOL restart) {
+void requestStartTransfer(BOOL restart) {
     buffer.index = 0;
     while(I2CCONbits.SEN || I2CCONbits.PEN || I2CCONbits.RSEN || I2CCONbits.RCEN 
         || I2CCONbits.ACKEN || I2CSTATbits.TRSTAT);
     if(restart) {
         I2CCONbits.RSEN = TRUE; // Set repeated start event.
-        //while(I2CCONbits.RSEN); // Wait for Repeated Start to finish
     } else {
         I2CCONbits.SEN = TRUE; // Start condition
-        //while(I2CCONbits.SEN);  // Wait for Start to finish.
     }
+    buffer.ready = FALSE;
     state = send_header;
 }
 
-void int_stopTransfer(void) {
-   
-}
-
-void int_writeByte(UINT8 slave_address, UINT8 reg_address, UINT8 data) {
-    buffer.header[0] = ((slave_address << 1) & 0xFE); // 7bit slave address to 8bit with RW bit cleared.
-    buffer.header[1] = reg_address;
+void requestWriteByte(UINT8 slave_address, UINT8 reg_address, UINT8 data) {
+    getMessageHeader(buffer.header, slave_address, reg_address);
     buffer.wdata[0] = data;
     buffer.mode = WRITE_MODE;
     buffer.len = 1;
     // Check if it's safe to start transfer!
-    int_startTransfer(FALSE);
+    requestStartTransfer(FALSE);
 }
 
-void int_writeBytes(UINT8 slave_address, UINT8 reg_address, UINT8* data_arr, UINT8 len) {
-    buffer.header[0] = slave_address;
-    buffer.header[1] = reg_address;
+void requestWriteBytes(UINT8 slave_address, UINT8 reg_address, UINT8* data_arr, UINT8 len) {
+    getMessageHeader(buffer.header, slave_address, reg_address);
     // Copy data from data_arr to the buffer so it doesn't matter what happens to data_arr
-    copyArray(data_arr, buffer.wdata, len); 
+    copyArray(data_arr, buffer.wdata, len);
     buffer.len = len;
     buffer.mode = WRITE_MODE;
     // Check if it's safe to start transfer!
-    int_startTransfer(FALSE);
+    requestStartTransfer(FALSE);
 }
 
-void int_readByte(UINT8 slave_address, UINT8 reg_address, UINT8* data) {
-    buffer.header[0] = slave_address;
-    buffer.header[1] = reg_address;
-//    buffer.data = data;
+void requestReadByte(UINT8 slave_address, UINT8 reg_address, UINT8* data) {
+    getMessageHeader(buffer.header, slave_address, reg_address);
     buffer.rdata = data; // Read directly to variable memory address.
     buffer.len = 1;
     buffer.mode = READ_MODE;
-    int_startTransfer(FALSE);
+    requestStartTransfer(FALSE);
 }
 
-void int_readBytes(UINT8 slave_address, UINT8 reg_address, UINT8* data_arr, UINT8 len) {
-    buffer.header[0] = slave_address;
-    buffer.header[1] = reg_address;
+void requestReadBytes(UINT8 slave_address, UINT8 reg_address, UINT8* data_arr, UINT8 len) {
+    getMessageHeader(buffer.header, slave_address, reg_address);
     buffer.rdata = data_arr; // Read directly into array memory address.
     buffer.len = len;
     buffer.mode = READ_MODE;
-    int_startTransfer(FALSE);
+    requestStartTransfer(FALSE);
 }
